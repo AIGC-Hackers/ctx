@@ -61,10 +61,13 @@ ctx site del example.com
 
 ```jsonc
 {
-  // Default parameters merged into all Cloudflare Browser Rendering requests
+  // Default parameters merged into all Cloudflare Browser Rendering requests.
+  // Any top-level CF API parameter works here: userAgent, viewport, gotoOptions, etc.
+  // Full parameter reference: https://developers.cloudflare.com/browser-rendering/rest-api/
   "defaults": {
     "gotoOptions": {"waitUntil": "networkidle2"},
-    "viewport": {"width": 1920, "height": 1080}
+    "viewport": {"width": 1920, "height": 1080},
+    "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
   },
 
   // Cache TTL for all cached content (markdown, screenshots, links)
