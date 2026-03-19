@@ -71,6 +71,71 @@ func TestReadOutput_SummaryUsesExplicitURL(t *testing.T) {
 	}
 }
 
+// ===== skillReferencesHint =====
+
+func TestSkillReferencesHint_GitHubSkillWithRefs(t *testing.T) {
+	target := "https://github.com/AvdLee/swift-testing-agent-skill/blob/main/swift-testing-expert/SKILL.md"
+	content := "---\nname: swift-testing-expert\n---\n\n# Swift Testing\n\nSee references/fundamentals.md for details.\n"
+
+	got := skillReferencesHint(target, content)
+	if !strings.Contains(got, "[ctx:skill-references]") {
+		t.Fatal("expected skill-references hint for GitHub SKILL.md with references/")
+	}
+	if !strings.Contains(got, "github://AvdLee/swift-testing-agent-skill@main/swift-testing-expert/references/<file>") {
+		t.Errorf("hint should contain github:// base path, got:\n%s", got)
+	}
+}
+
+func TestSkillReferencesHint_GitHubScheme(t *testing.T) {
+	target := "github://owner/repo@v2/my-skill/SKILL.md"
+	content := "See references/guide.md\n"
+
+	got := skillReferencesHint(target, content)
+	if !strings.Contains(got, "github://owner/repo@v2/my-skill/references/<file>") {
+		t.Errorf("should handle github:// scheme, got:\n%s", got)
+	}
+}
+
+func TestSkillReferencesHint_NotSkillMD(t *testing.T) {
+	target := "https://github.com/owner/repo/blob/main/README.md"
+	content := "Some content with references/ mentioned.\n"
+
+	got := skillReferencesHint(target, content)
+	if strings.Contains(got, "[ctx:skill-references]") {
+		t.Error("should not trigger for non-SKILL.md files")
+	}
+}
+
+func TestSkillReferencesHint_NoReferencesInContent(t *testing.T) {
+	target := "https://github.com/owner/repo/blob/main/my-skill/SKILL.md"
+	content := "---\nname: simple-skill\n---\n\nNo refs here.\n"
+
+	got := skillReferencesHint(target, content)
+	if strings.Contains(got, "[ctx:skill-references]") {
+		t.Error("should not trigger when content has no references/ pattern")
+	}
+}
+
+func TestSkillReferencesHint_NonGitHub(t *testing.T) {
+	target := "https://example.com/skills/SKILL.md"
+	content := "See references/foo.md\n"
+
+	got := skillReferencesHint(target, content)
+	if strings.Contains(got, "[ctx:skill-references]") {
+		t.Error("should not trigger for non-GitHub URLs")
+	}
+}
+
+func TestSkillReferencesHint_PreservesOriginalContent(t *testing.T) {
+	target := "https://github.com/owner/repo/blob/main/skill/SKILL.md"
+	content := "Original content.\nSee references/foo.md\n"
+
+	got := skillReferencesHint(target, content)
+	if !strings.HasPrefix(got, content) {
+		t.Error("hint should be appended, not replace original content")
+	}
+}
+
 func TestReadOutput_ShortDocNeverSummarizes(t *testing.T) {
 	content := "# Hello\n\nShort content.\n"
 	cmd := &ReadCmd{URL: ""}

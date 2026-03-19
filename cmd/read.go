@@ -77,7 +77,8 @@ func (c *ReadCmd) Run(_ *api.Client) error {
 	// Try cache
 	if !c.NoCache {
 		if data, _, ok := cache.Lookup(cacheKey, ".md"); ok {
-			return c.output(cache.Path(cacheKey, ".md"), target, string(data), true)
+			content := skillReferencesHint(target, string(data))
+			return c.output(cache.Path(cacheKey, ".md"), target, content, true)
 		}
 	}
 
@@ -109,7 +110,26 @@ func (c *ReadCmd) Run(_ *api.Client) error {
 		}
 	}
 
+	content = skillReferencesHint(target, content)
 	return c.output(cache.Path(cacheKey, ".md"), target, content, true)
+}
+
+// skillReferencesHint appends a reference discovery hint when reading a GitHub-hosted SKILL.md.
+// No API call needed — the SKILL.md body already lists its references.
+// We just provide the base path so the agent knows how to ctx read them.
+func skillReferencesHint(target, content string) string {
+	canonical := canonicalizeURL(target)
+	if !strings.HasPrefix(canonical, "github://") {
+		return content
+	}
+	if !strings.HasSuffix(canonical, "/SKILL.md") {
+		return content
+	}
+	if !strings.Contains(content, "references/") {
+		return content
+	}
+	base := strings.TrimSuffix(canonical, "SKILL.md") + "references/"
+	return content + "\n---\n[ctx:skill-references] Read references with: ctx read " + base + "<file>\n"
 }
 
 func extractDomainFromURL(rawURL string) string {
