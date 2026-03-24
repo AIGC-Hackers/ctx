@@ -1,4 +1,4 @@
-.PHONY: build install clean
+.PHONY: build install clean test
 
 BIN_DIR := bin
 BIN := $(BIN_DIR)/ctx
@@ -15,6 +15,10 @@ install: build
 		ln -sf "$$(cd $(BIN_DIR) && pwd)/ctx" $(LOCAL_BIN); \
 		echo "linked → $(LOCAL_BIN)"; \
 	fi
+
+test:
+	go test ./...
+	bun test config/
 
 clean:
 	rm -rf $(BIN_DIR)

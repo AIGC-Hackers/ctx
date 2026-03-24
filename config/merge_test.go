@@ -203,11 +203,21 @@ func TestBuildRequestBody_MarkdownDefaultCleanup(t *testing.T) {
 	if !ok || len(scripts) == 0 {
 		t.Fatal("markdown endpoint should have default addScriptTag")
 	}
-	// Check that the script contains removal logic
 	tag := scripts[0].(map[string]any)
 	content, ok := tag["content"].(string)
-	if !ok || !strings.Contains(content, "remove()") {
-		t.Error("default cleanup script should contain remove() call")
+	if !ok || content == "" {
+		t.Fatal("cleanup script should be non-empty embedded content")
+	}
+	// Verify all three phases are present in the embedded script.
+	// Detailed DOM behavior is tested in cleanup.spec.ts (BDD specs).
+	for _, marker := range []string{
+		`querySelector("[role=main]")`, // Phase 1: semantic containers
+		"bodyLen",                      // Phase 2: coverage guard
+		"remove()",                     // Phase 3: subtractive fallback
+	} {
+		if !strings.Contains(content, marker) {
+			t.Errorf("embedded cleanup.js missing phase marker: %s", marker)
+		}
 	}
 }
 

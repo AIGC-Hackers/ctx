@@ -15,6 +15,7 @@ type ScrapeCmd struct {
 	URL      string   `arg:"" help:"URL to scrape" optional:""`
 	Selector []string `short:"s" help:"CSS selectors (repeatable)"`
 	TextOnly bool     `help:"Output text content only" default:"false"`
+	Raw      bool     `help:"Return raw HTML without stripping inline styles" default:"false"`
 }
 
 func (c *ScrapeCmd) Run(_ *api.Client) error {
@@ -71,6 +72,14 @@ func (c *ScrapeCmd) Run(_ *api.Client) error {
 		fmt.Printf("No elements matched selectors %v on %s.\n", c.Selector, url)
 		fmt.Printf("Hint: use `ctx read %s` to inspect page content, or `ctx screenshot %s` to see the rendered page.\n", url, url)
 		return nil
+	}
+
+	if !c.Raw {
+		for i := range results {
+			for j := range results[i].Results {
+				results[i].Results[j].HTML = cfrender.CleanHTML(results[i].Results[j].HTML)
+			}
+		}
 	}
 
 	if c.TextOnly {

@@ -1,10 +1,14 @@
 package config
 
 import (
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"net/url"
 )
+
+//go:embed cleanup.js
+var cleanupScript string
 
 // BuildRequestBody constructs the final CF API request body by merging layers:
 //
@@ -42,10 +46,8 @@ func BuildRequestBody(endpoint string, targetURL string, dataBody []byte, flagOv
 	}
 
 	// Layer 1.5: Default DOM cleanup for markdown endpoint.
-	// Removes common navigation noise (sidebar, header, footer, nav) so the
-	// extracted markdown contains mostly page content.
-	// This runs after settings defaults (which may add their own scripts) and
-	// appends rather than replaces. Can be overridden by -d body or CLI flags.
+	// Three-phase script: semantic container → guarded density → subtractive.
+	// See cleanup.js for the full strategy and rationale.
 	if endpoint == "markdown" {
 		injectDefaultCleanup(merged)
 	}
@@ -102,31 +104,9 @@ func extractDomain(rawURL string) string {
 	return u.Hostname()
 }
 
-// injectDefaultCleanup appends a script that isolates the main content block
-// using a text-density heuristic: find the container with the highest
-// text-to-link ratio, then replace the body with just that element.
-// This works on sites with non-semantic HTML (no <nav>/<aside>/standard classes)
-// by focusing on content density rather than tag names.
+// injectDefaultCleanup appends the embedded cleanup.js script to addScriptTag.
 func injectDefaultCleanup(merged map[string]any) {
-	script := `(function(){` +
-		// Phase 1: try to isolate the densest content block
-		`let best=null,bestScore=0;` +
-		`document.querySelectorAll("div,section,article,main").forEach(el=>{` +
-		`const t=el.innerText||"";` +
-		`const links=el.querySelectorAll("a").length;` +
-		`const score=t.length/(links+1);` +
-		`if(t.length>200&&score>bestScore){bestScore=score;best=el}` +
-		`});` +
-		`if(best){document.body.innerHTML=best.outerHTML;return}` +
-		// Phase 2: fallback — remove known junk by selector
-		`document.querySelectorAll("nav,header,footer,aside,` +
-		`[role=navigation],[role=banner],[role=contentinfo],` +
-		`[class*=sidebar],[class*=menu],[class*=nav-],[class*=footer],` +
-		`[class*=header],[id*=sidebar],[id*=menu],[id*=nav]` +
-		`").forEach(e=>e.remove())` +
-		`})()`
-
-	tag := map[string]any{"content": script}
+	tag := map[string]any{"content": cleanupScript}
 
 	if existing, ok := merged["addScriptTag"].([]any); ok {
 		merged["addScriptTag"] = append(existing, tag)

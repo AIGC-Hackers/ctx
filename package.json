@@ -1,0 +1,6 @@
+{
+  "private": true,
+  "devDependencies": {
+    "happy-dom": "^17.4.4"
+  }
+}
