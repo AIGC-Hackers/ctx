@@ -8,6 +8,13 @@ description: >-
   JSON data, and crawl entire documentation sites.
 ---
 
+## Execution rules
+
+- `ctx` is a **global CLI tool**. Run it directly (`ctx read ...`), never `cd` into the skill directory first.
+- **Always use `2>&1`** so stderr diagnostics (auto-retry messages, warnings) are visible.
+- **Never pipe through `head`, `tail`, `cut`**, or any truncation — `ctx` already manages content length via structural summaries.
+- **Never use `2>/dev/null`** — stderr carries actionable diagnostics, not noise.
+
 ## Core Workflow: search → read
 
 ### 1. Find documentation sources
@@ -63,9 +70,7 @@ To find the right selector, probe the page first:
 
 Other useful `-d` parameters: `cookies`, `waitForSelector`, `gotoOptions.waitUntil`, `viewport`.
 
-**stdout/stderr contract**: stdout is always clean document content. Diagnostic hints (incomplete content, empty page warnings) go to stderr only.
-
-**IMPORTANT**: Never pipe ctx output through `head`, `tail`, `cut`, or any truncation. ctx already manages content length — large documents return a structural summary automatically. Truncating destroys the summary structure and section references.
+**stdout/stderr contract**: stdout = document content, stderr = diagnostics (auto-retry, warnings). Both matter — see execution rules above.
 
 ### 3. Navigate large documents
 
