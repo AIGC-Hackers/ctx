@@ -113,12 +113,27 @@ Use `--toc` for a compact outline without previews.
 | Screenshot only content, skip nav/ads    | `ctx screenshot <url> --selector "main"` | Common: `main`, `article`, `.content`, `#content` |
 | Need structured data extraction          | `ctx json <url> --prompt "..."`   | Extract pricing tiers as JSON            |
 
-Common compositions:
+### Fast SPA detection and fallback
+
+`ctx read` returning empty or near-empty content is a strong signal that the page is a **heavy SPA** (JS-rendered, no semantic HTML, hashed CSS classes). When this happens:
+
+1. **Skip selector-based approaches** — `ctx scrape -s "main"` and `ctx screenshot --selector` will likely fail too, because the same rendering instability that blocks `ctx read` also means DOM elements are unreliable.
+2. **Go straight to `ctx screenshot`** — the default (no `--selector`) always works because it captures the full viewport. Use the metadata output (`page=N viewport=N screen=X/Y`) to navigate with `--scroll`.
+3. **Do NOT try to probe the DOM** via `addScriptTag` JS injection — on SPAs, scripts often execute before the app renders, producing empty results.
+
+Quick decision tree:
+```
+ctx read <url> → got content?
+  YES → use read/scrape/screenshot --selector as needed
+  NO  → heavy SPA → ctx screenshot + --scroll (skip selector attempts)
+```
+
+### Common compositions
 
 - **Docs research**: `ctx docs <lib> "<query>"` → `ctx read <url>` → `ctx read <url> -s N` for deep sections
 - **Full-site understanding**: `ctx crawl <url> --limit 20 --depth 2` (replaces manual links + read loop)
 - **Surgical extraction**: `ctx read <url> --toc` to find target → `ctx scrape <url> -s "table.params"` to extract it
-- **Content-focused screenshot**: `ctx scrape <url> -s "main" -s "article"` to find the right selector → `ctx screenshot <url> --selector "article"`
+- **Content-focused screenshot** (semantic HTML sites only): `ctx scrape <url> -s "main" -s "article"` to find the right selector → `ctx screenshot <url> --selector "article"`
 
 ## Browser Rendering Commands
 

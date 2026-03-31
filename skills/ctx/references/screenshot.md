@@ -55,7 +55,9 @@ ctx screenshot <url> --selector ".content"
 
 Common content selectors: `main`, `article`, `.content`, `#content`, `[role="main"]`.
 
-If unsure which selector to use, probe first:
+**Prerequisite**: `--selector` only works on sites with semantic HTML. If `ctx read <url>` returned empty (heavy SPA signal), skip `--selector` entirely — use the default screenshot + `--scroll` instead.
+
+For sites where `ctx read` works, probe to find the right selector:
 ```bash
 ctx scrape <url> -s "main" -s "article" -s ".content" --text-only
 ```
