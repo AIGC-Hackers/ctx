@@ -173,10 +173,9 @@ func (c *ReadCmd) fetch(url string, dataBody []byte) (string, string, error) {
 	}
 
 	// HTML response or incomplete content — fallback to CF rendering.
+	// Only the incomplete-content case is worth surfacing; HTML fallback is expected.
 	if content != "" {
 		fmt.Fprintf(os.Stderr, "Content looks incomplete, rendering via Cloudflare...\n")
-	} else {
-		fmt.Fprintf(os.Stderr, "HTML response, rendering via Cloudflare...\n")
 	}
 	content, err = fetchCloudflare(url, nil)
 	return content, "cloudflare", err

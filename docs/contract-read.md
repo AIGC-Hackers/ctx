@@ -90,7 +90,7 @@ Two-phase fetch:
 - On HTTP error (non-2xx): return error immediately. Do NOT fall through to Phase 2.
 
 **Phase 2: Cloudflare fallback** (triggered by HTML response OR `looksIncomplete` content)
-- Log `HTML response, rendering via Cloudflare...` or `Content looks incomplete, rendering via Cloudflare...` to **stderr**.
+- Log `Content looks incomplete, rendering via Cloudflare...` to **stderr** only when Phase 1 returned text that looks incomplete.
 - Build request body via merge pipeline.
 - Call CF Browser Rendering `/markdown` endpoint. **Source = `cloudflare`**.
 - On CF credential error: return actionable error.
@@ -116,7 +116,7 @@ Three output modes, selected by flags:
 ### 3.2 stderr
 
 stderr carries transient diagnostics that are NOT part of the result:
-- Fetch progress: `HTML response, rendering via Cloudflare...`
+- Fetch progress: `Content looks incomplete, rendering via Cloudflare...`
 - Quality warnings: `Content may be incomplete...`
 - Empty-content warnings: `No content returned...`
 
@@ -452,7 +452,7 @@ NOTE:   JSON accepted directly in Phase 1, no CF fallback
 ```
 INPUT:  ctx read https://spa.example.com/docs  (returns text/html)
 STDOUT: <CF-rendered markdown>
-STDERR: HTML response, rendering via Cloudflare...
+STDERR: (empty)
 EXIT:   0
 NOTE:   looksIncomplete is NOT checked (source=cloudflare)
 ```
@@ -547,8 +547,7 @@ EXIT:   1
 ```
 INPUT:  ctx read https://spa.example.com  (HTTP returns HTML, CF not configured)
 STDOUT: (empty)
-STDERR: HTML response, rendering via Cloudflare...
-        cloudflare not configured — run: ctx auth login cloudflare
+STDERR: cloudflare not configured — run: ctx auth login cloudflare
 EXIT:   1
 ```
 
