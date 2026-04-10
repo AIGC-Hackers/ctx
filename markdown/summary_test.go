@@ -63,6 +63,42 @@ Pass flags for options.
 	}
 }
 
+func TestFormatSummary_IncludesPrefacePreview(t *testing.T) {
+	doc := `Title: Test Video
+
+Description:
+This is the first description line.
+This is the second description line.
+This is the third description line.
+This is the fourth description line.
+This is the fifth description line.
+This is the sixth description line.
+
+# Transcript
+
+Hello world.
+`
+	source := []byte(doc)
+	headings := ParseHeadings(source)
+	got := FormatSummary(source, headings, "https://example.com/video", "/tmp/cache/video")
+
+	if !strings.Contains(got, "Title: Test Video") {
+		t.Fatalf("expected preface title to appear in summary, got:\n%s", got)
+	}
+	if !strings.Contains(got, "Description:") {
+		t.Fatalf("expected preface description label to appear in summary, got:\n%s", got)
+	}
+	if !strings.Contains(got, "This is the third description line.") {
+		t.Fatalf("expected preface body preview to appear in summary, got:\n%s", got)
+	}
+	if !strings.Contains(got, "This is the third description line....") {
+		t.Fatalf("expected truncated preface preview with ellipsis, got:\n%s", got)
+	}
+	if strings.Contains(got, "This is the fourth description line.") {
+		t.Fatalf("expected preface preview to be capped, got:\n%s", got)
+	}
+}
+
 func TestFormatSummary_EmptySections(t *testing.T) {
 	doc := `# Title
 

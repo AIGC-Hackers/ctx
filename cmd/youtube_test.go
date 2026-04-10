@@ -72,6 +72,7 @@ func TestParseYouTubeMetadata_PrefersManualSubtitles(t *testing.T) {
 	raw := []byte(`{
 		"id":"abc123",
 		"title":"Transcript Test",
+		"description":"First paragraph.\n\nSecond paragraph.",
 		"channel":"Ctx",
 		"duration":3670,
 		"chapters":[
@@ -93,6 +94,9 @@ func TestParseYouTubeMetadata_PrefersManualSubtitles(t *testing.T) {
 	}
 	if meta.CaptionKind != "subtitles" {
 		t.Fatalf("CaptionKind = %q, want subtitles", meta.CaptionKind)
+	}
+	if meta.Description == "" {
+		t.Fatal("expected description to be parsed")
 	}
 	if meta.CaptionLang != "en" {
 		t.Fatalf("CaptionLang = %q, want en", meta.CaptionLang)
@@ -151,6 +155,7 @@ func TestLooksLikeTranslatedYouTubeTrack(t *testing.T) {
 func TestRenderYouTubeTranscript_UsesChapterSections(t *testing.T) {
 	meta := youTubeMetadata{
 		Title:        "Video",
+		Description:  "Line one.\n\nLine two.",
 		Channel:      "Ctx",
 		Duration:     2 * time.Hour,
 		CaptionKind:  "subtitles",
@@ -169,6 +174,9 @@ func TestRenderYouTubeTranscript_UsesChapterSections(t *testing.T) {
 	doc := renderYouTubeTranscript(meta, cues)
 	if !strings.Contains(doc, "Title: Video") {
 		t.Fatalf("missing plain title header, got:\n%s", doc)
+	}
+	if !strings.Contains(doc, "Description:\nLine one.\n\nLine two.") {
+		t.Fatalf("missing description block, got:\n%s", doc)
 	}
 	if !strings.Contains(doc, "# 00:00:00-00:10:00") {
 		t.Fatalf("missing first time section, got:\n%s", doc)
@@ -306,5 +314,14 @@ func TestFetchYouTubeTranscript_PrefersNativeTrackOverTranslatedDisclaimer(t *te
 	}
 	if strings.Contains(content, "translated by AI") {
 		t.Fatalf("translated disclaimer should have been skipped, got:\n%s", content)
+	}
+}
+
+func TestNormalizeYouTubeDescription(t *testing.T) {
+	raw := " First line  \r\n\r\n\r\n  Second line\n\nThird line  "
+	got := normalizeYouTubeDescription(raw)
+	want := "First line\n\nSecond line\n\nThird line"
+	if got != want {
+		t.Fatalf("normalizeYouTubeDescription() = %q, want %q", got, want)
 	}
 }

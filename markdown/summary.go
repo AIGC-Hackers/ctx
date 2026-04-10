@@ -23,6 +23,7 @@ func FormatSummary(source []byte, headings []Heading, url, cachePath string) str
 	var b strings.Builder
 	fmt.Fprintf(&b, "[ctx:summary] %d lines, %d sections. Read sections: ctx read %s -s <number> (e.g. -s 10 or -s 10-20)\n", totalLines, len(headings), url)
 	fmt.Fprintf(&b, "Full content: %s\n", cachePath)
+	appendPrefacePreview(&b, source, headings)
 
 	for _, h := range headings {
 		end := h.EndByte
@@ -62,6 +63,36 @@ func FormatSummary(source []byte, headings []Heading, url, cachePath string) str
 	}
 
 	return b.String()
+}
+
+func appendPrefacePreview(b *strings.Builder, source []byte, headings []Heading) {
+	if len(headings) == 0 || headings[0].StartByte <= 0 {
+		return
+	}
+
+	preface := string(source[:headings[0].StartByte])
+	lines := strings.Split(preface, "\n")
+	var body []string
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed != "" {
+			body = append(body, trimmed)
+		}
+	}
+	if len(body) == 0 {
+		return
+	}
+
+	previewLines := min(len(body), 5)
+	b.WriteByte('\n')
+	for i := 0; i < previewLines; i++ {
+		text := body[i]
+		if i == previewLines-1 && len(body) > previewLines {
+			text += "..."
+		}
+		b.WriteString(text)
+		b.WriteByte('\n')
+	}
 }
 
 // FormatLineSummary generates a line-window summary for long documents WITHOUT headings.

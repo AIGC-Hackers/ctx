@@ -26,6 +26,7 @@ type youTubeMetadata struct {
 	VideoID       string
 	CanonicalURL  string
 	Title         string
+	Description   string
 	Channel       string
 	Duration      time.Duration
 	CaptionKind   string
@@ -62,6 +63,7 @@ type youTubeTranscriptResponse struct {
 type youTubeMetadataResponse struct {
 	ID                string                         `json:"id"`
 	Title             string                         `json:"title"`
+	Description       string                         `json:"description"`
 	Channel           string                         `json:"channel"`
 	Uploader          string                         `json:"uploader"`
 	DurationSeconds   float64                        `json:"duration"`
@@ -204,6 +206,7 @@ func parseYouTubeMetadata(data []byte, canonicalURL string) (youTubeMetadata, er
 		VideoID:      resp.ID,
 		CanonicalURL: canonicalURL,
 		Title:        strings.TrimSpace(resp.Title),
+		Description:  normalizeYouTubeDescription(resp.Description),
 		Channel:      firstNonEmpty(strings.TrimSpace(resp.Channel), strings.TrimSpace(resp.Uploader)),
 		Duration:     secondsToDuration(resp.DurationSeconds),
 	}
@@ -416,6 +419,7 @@ func renderYouTubeTranscript(meta youTubeMetadata, cues []youTubeCue) string {
 	b.WriteString("Title: ")
 	b.WriteString(firstNonEmpty(meta.Title, "YouTube Video"))
 	b.WriteString("\n\n")
+	writeYouTubeDescription(&b, meta.Description)
 	writeYouTubeMetadata(&b, meta)
 
 	sections := buildYouTubeSections(meta, cues)
@@ -440,9 +444,19 @@ func renderYouTubeUnavailable(meta youTubeMetadata) string {
 	b.WriteString("Title: ")
 	b.WriteString(firstNonEmpty(meta.Title, "YouTube Video"))
 	b.WriteString("\n\n")
+	writeYouTubeDescription(&b, meta.Description)
 	writeYouTubeMetadata(&b, meta)
 	b.WriteString("\nNo subtitles or captions are available for this video.\n")
 	return strings.TrimRight(b.String(), "\n")
+}
+
+func writeYouTubeDescription(b *strings.Builder, description string) {
+	if description == "" {
+		return
+	}
+	b.WriteString("Description:\n")
+	b.WriteString(description)
+	b.WriteString("\n\n")
 }
 
 func writeYouTubeMetadata(b *strings.Builder, meta youTubeMetadata) {
@@ -462,6 +476,32 @@ func writeYouTubeMetadata(b *strings.Builder, meta youTubeMetadata) {
 	if meta.CanonicalURL != "" {
 		fmt.Fprintf(b, "- url: %s\n", meta.CanonicalURL)
 	}
+}
+
+func normalizeYouTubeDescription(description string) string {
+	description = strings.ReplaceAll(description, "\r\n", "\n")
+	description = strings.TrimSpace(description)
+	if description == "" {
+		return ""
+	}
+
+	lines := strings.Split(description, "\n")
+	var cleaned []string
+	blank := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			if blank {
+				continue
+			}
+			cleaned = append(cleaned, "")
+			blank = true
+			continue
+		}
+		cleaned = append(cleaned, trimmed)
+		blank = false
+	}
+	return strings.TrimSpace(strings.Join(cleaned, "\n"))
 }
 
 type youTubeSection struct {
