@@ -352,10 +352,6 @@ func TestCanonicalizeURL(t *testing.T) {
 			"https://github.com/owner/repo/issues/12",
 			"github://owner/repo/issues/12",
 		},
-		{
-			"https://www.youtube.com/watch?v=rIwgZWzUKm8&t=15s",
-			"https://www.youtube.com/watch?v=rIwgZWzUKm8",
-		},
 		// Non-read github URL stays as-is
 		{
 			"https://github.com/owner/repo/issues",
@@ -465,10 +461,6 @@ func TestNormalizeURL(t *testing.T) {
 		{
 			"https://github.com/owner/repo/issues/12",
 			"github://owner/repo/issues/12",
-		},
-		{
-			"https://youtu.be/rIwgZWzUKm8?si=test",
-			"https://www.youtube.com/watch?v=rIwgZWzUKm8",
 		},
 		{
 			"https://docs.example.com/guide",

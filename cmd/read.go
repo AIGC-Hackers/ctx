@@ -60,8 +60,6 @@ type issueCommentSelector struct {
 	Label string
 }
 
-const youTubeTranscriptCacheVersion = "youtube-transcript-v2"
-
 var readHTTPFetcher = fetchHTTP
 var readCloudflareFetcher = fetchCloudflare
 
@@ -212,11 +210,32 @@ func extractDomainFromURL(rawURL string) string {
 	return rawURL
 }
 
+func isYouTubeVideoURL(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	switch host {
+	case "youtu.be":
+		return strings.Trim(u.Path, "/") != ""
+	case "youtube.com", "www.youtube.com", "m.youtube.com":
+		return (u.Path == "/watch" && u.Query().Get("v") != "") ||
+			strings.HasPrefix(u.Path, "/shorts/") ||
+			strings.HasPrefix(u.Path, "/embed/")
+	default:
+		return false
+	}
+}
+
 // fetch dispatches to the right fetcher and returns (content, source, error).
 func (c *ReadCmd) fetch(url string, dataBody []byte) (string, string, error) {
-	if _, _, ok := parseYouTubeURL(url); ok {
-		content, err := fetchYouTubeTranscript(url)
-		return content, "youtube", err
+	target := url
+	if target == "" && dataBody != nil {
+		target = effectiveURL("", dataBody)
+	}
+	if isYouTubeVideoURL(target) {
+		return "", "", fmt.Errorf("YouTube transcript extraction is not supported. Export the transcript to a local file and run `ctx read <file>` instead.")
 	}
 
 	// github://owner/repo@ref/path or github://owner/repo/path
@@ -581,30 +600,15 @@ func countLines(s string) int {
 
 func readCacheKey(target string, dataBody []byte) string {
 	parts := []string{"markdown", canonicalizeURL(target)}
-	if version := readCacheVersion(target); version != "" {
-		// Keep cache versioning at the edge so canonical URLs stay stable while
-		// document-shape changes (like transcript sectioning) don't poison reads.
-		parts = append(parts, version)
-	}
 	if dataBody != nil {
 		parts = append(parts, string(dataBody))
 	}
 	return cache.Key(parts...)
 }
 
-func readCacheVersion(target string) string {
-	if _, _, ok := parseYouTubeURL(target); ok {
-		return youTubeTranscriptCacheVersion
-	}
-	return ""
-}
-
 // canonicalizeURL normalizes GitHub URLs to github:// form for cache key consistency.
 // When a ref is present, the format is github://owner/repo@ref/path.
 func canonicalizeURL(url string) string {
-	if _, canonical, ok := parseYouTubeURL(url); ok {
-		return canonical
-	}
 	if strings.Contains(url, "github.com") {
 		if path, ref, ok := parseGitHubBlobURL(url); ok {
 			return formatGitHubScheme(path, ref)

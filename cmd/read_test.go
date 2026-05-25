@@ -9,8 +9,6 @@ import (
 	"os"
 	"strings"
 	"testing"
-
-	"github.com/ethan-huo/ctx/cache"
 )
 
 // captureStdout runs fn and returns what it wrote to stdout.
@@ -172,19 +170,13 @@ func TestReadOutput_ShortDocNeverSummarizes(t *testing.T) {
 	}
 }
 
-func TestReadCacheKey_YouTubeUsesVersionedNamespace(t *testing.T) {
-	urlA := "https://www.youtube.com/watch?v=rIwgZWzUKm8&t=15s"
-	urlB := "https://youtu.be/rIwgZWzUKm8?si=test"
-
-	gotA := readCacheKey(urlA, nil)
-	gotB := readCacheKey(urlB, nil)
-	wantOldShape := cache.Key("markdown", canonicalizeURL(urlA))
-
-	if gotA != gotB {
-		t.Fatalf("canonical YouTube URLs should share cache key, got %q vs %q", gotA, gotB)
+func TestReadFetch_YouTubeVideoReturnsUnsupported(t *testing.T) {
+	_, _, err := (&ReadCmd{}).fetch("https://www.youtube.com/watch?v=abc123", nil)
+	if err == nil {
+		t.Fatal("YouTube video URL should be rejected")
 	}
-	if gotA == wantOldShape {
-		t.Fatalf("YouTube cache key should include render version to avoid stale transcript shape collisions")
+	if !strings.Contains(err.Error(), "YouTube transcript extraction is not supported") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

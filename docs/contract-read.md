@@ -22,7 +22,7 @@ Design principle: **Agent Experience (AX) first**. An agent calling `ctx read` m
 | 4 | Host is `github.com` AND path contains `/tree/` with a non-empty subpath | **github-tree** | GitHub Contents API (directory listing) |
 | 5 | Host is `github.com` AND path is repo root or `tree/<ref>` root | **github-readme** | GitHub README API |
 | 6 | Host is `github.com` AND path matches `/issues/<id>` | **github-issue** | GitHub Issues API + comments |
-| 7 | Host is `youtube.com`, `www.youtube.com`, `m.youtube.com`, or `youtu.be` | **youtube** | `yt-dlp` metadata + transcript fetch |
+| 7 | YouTube video URL (`watch`, `youtu.be`, `shorts`, `embed`) | **unsupported-youtube** | Clear unsupported error |
 | 8 | Starts with `http://` or `https://`, `-d` body provided | **cf-direct** | Cloudflare Browser Rendering |
 | 9 | Starts with `http://` or `https://` | **http-negotiate** | HTTP with content negotiation → auto CF fallback |
 | 10 | None of the above | **error** | Reject with usage hint |
@@ -80,24 +80,7 @@ For simple refs (no `/`): both URL formats work identically.
 - Directory entries end with `/`, symlinks end with `@`, submodules render as `name (submodule)`.
 - Entries are sorted directories first, then files, then other types, each group case-insensitively by name.
 
-### 2.3 youtube
-
-- Accepted inputs:
-  - `https://www.youtube.com/watch?v=<id>`
-  - `https://youtu.be/<id>`
-  - `https://www.youtube.com/shorts/<id>`
-  - `https://www.youtube.com/embed/<id>`
-- Canonical form is always `https://www.youtube.com/watch?v=<id>`. Time offsets like `t=15s` do not affect cache identity.
-- `yt-dlp` is used only to resolve video metadata, chapter data, and available caption URLs.
-- `ctx` fetches the selected `json3` caption track itself and renders the final markdown document.
-- Track selection prefers manual subtitles over automatic captions, and prefers `json3` plus a stable language priority (`en`, `zh`, `ja`, then other original languages, then translated tracks).
-- If the leading cues of a candidate track explicitly announce that the subtitles are AI-translated, that track is demoted behind cleaner candidates from the same video.
-- If the video has chapters, each chapter becomes a section heading. Otherwise transcript cues are grouped into fixed 15-minute sections.
-- If no captions are available, stdout contains video metadata plus a clear unavailable message instead of raw page HTML.
-
-The rendered transcript is intentionally shaped like a markdown document so long videos reuse the existing summary, `--toc`, and `-s` navigation flow. Section headings are time ranges, optionally suffixed with chapter titles.
-
-### 2.4 github-issue
+### 2.3 github-issue
 
 - Accepted inputs:
   - `https://github.com/owner/repo/issues/123`
@@ -113,6 +96,12 @@ The rendered transcript is intentionally shaped like a markdown document so long
 - `--comments 1-3` reads a specific inclusive range.
 - `--comments all` forces all comments to be rendered.
 - Issue rendering never uses the structural-summary mode. The issue-specific continuation hint replaces it.
+
+### 2.4 unsupported-youtube
+
+- YouTube video URLs are rejected before generic HTTP or browser rendering.
+- Error: `YouTube transcript extraction is not supported. Export the transcript to a local file and run ctx read <file> instead.`
+- `ctx read` intentionally does not depend on `yt-dlp`, browser cookies, or YouTube Data API caption authorization. Those paths are not reliable enough for the core read contract.
 
 ### 2.5 cf-direct (with `-d` body)
 
