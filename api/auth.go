@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -30,6 +31,30 @@ type TokenData struct {
 	ExpiresIn    int64  `json:"expires_in,omitempty"`
 	ExpiresAt    int64  `json:"expires_at,omitempty"`
 	Scope        string `json:"scope,omitempty"`
+}
+
+type tokenErrorResponse struct {
+	Error            string `json:"error"`
+	ErrorDescription string `json:"error_description"`
+}
+
+type oauthTokenError struct {
+	StatusCode       int
+	Code             string
+	ErrorDescription string
+}
+
+func (e *oauthTokenError) Error() string {
+	if e.ErrorDescription != "" {
+		if e.Code != "" {
+			return fmt.Sprintf("refresh failed: HTTP %d: %s (%s)", e.StatusCode, e.ErrorDescription, e.Code)
+		}
+		return fmt.Sprintf("refresh failed: HTTP %d: %s", e.StatusCode, e.ErrorDescription)
+	}
+	if e.Code != "" {
+		return fmt.Sprintf("refresh failed: HTTP %d: %s", e.StatusCode, e.Code)
+	}
+	return fmt.Sprintf("refresh failed: HTTP %d", e.StatusCode)
 }
 
 func LoadTokens() (*TokenData, error) {
@@ -96,14 +121,22 @@ func GetValidToken(baseURL string) (string, error) {
 	}
 
 	if tokens.RefreshToken == "" {
-		fmt.Fprintf(os.Stderr, "Context7 token expired and no refresh token available. Run: ctx auth login\n")
+		fmt.Fprintf(os.Stderr, "Context7 token expired and no refresh token available. Run: ctx auth login ctx7\n")
 		return "", nil
 	}
 
 	newTokens, err := refreshToken(baseURL, tokens.RefreshToken)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Context7 token refresh failed: %v — falling back to anonymous. Run: ctx auth login\n", err)
+		var tokenErr *oauthTokenError
+		if errors.As(err, &tokenErr) && tokenErr.Code == "invalid_grant" {
+			_ = ClearTokens()
+		}
+		fmt.Fprintf(os.Stderr, "Context7 token refresh failed: %v — falling back to anonymous. Run: ctx auth login ctx7\n", err)
 		return "", nil
+	}
+	if newTokens.RefreshToken == "" {
+		// OAuth refresh responses may omit refresh_token when the existing one remains valid.
+		newTokens.RefreshToken = tokens.RefreshToken
 	}
 	if err := SaveTokens(newTokens); err != nil {
 		return "", err
@@ -123,7 +156,15 @@ func refreshToken(baseURL, refresh string) (*TokenData, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("refresh failed: HTTP %d", resp.StatusCode)
+		var tokenErr tokenErrorResponse
+		if err := json.NewDecoder(resp.Body).Decode(&tokenErr); err == nil {
+			return nil, &oauthTokenError{
+				StatusCode:       resp.StatusCode,
+				Code:             tokenErr.Error,
+				ErrorDescription: tokenErr.ErrorDescription,
+			}
+		}
+		return nil, &oauthTokenError{StatusCode: resp.StatusCode}
 	}
 
 	var t TokenData
@@ -286,12 +327,12 @@ func generateState() string {
 func buildAuthURL(baseURL, challenge, state string) string {
 	params := url.Values{
 		"client_id":             {clientID},
-		"redirect_uri":         {redirectURI},
-		"code_challenge":       {challenge},
+		"redirect_uri":          {redirectURI},
+		"code_challenge":        {challenge},
 		"code_challenge_method": {"S256"},
-		"state":                {state},
-		"scope":                {"profile email"},
-		"response_type":        {"code"},
+		"state":                 {state},
+		"scope":                 {"profile email"},
+		"response_type":         {"code"},
 	}
 	return baseURL + "/api/oauth/authorize?" + params.Encode()
 }
