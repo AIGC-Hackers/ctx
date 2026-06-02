@@ -48,6 +48,7 @@ Auto-detects URL type and fetches accordingly:
 
 - Local file / `file://` → direct read (always full content, no summary)
 - `github://owner/repo@ref/path` → GitHub API (supports `@ref` for versioned docs)
+- Do not put GitHub web path segments like `/blob/` or `/tree/` inside `github://`; use the HTTPS GitHub URL or convert to `github://owner/repo@ref/path`.
 - `https://github.com/.../blob/...` → GitHub API (auto-converted)
 - `https://github.com/.../tree/<ref>/<path>` → GitHub directory listing via GitHub API (`[ctx:github-dir]` header + `ls`-style entries)
 - `https://github.com/owner/repo` → repository README via GitHub API
