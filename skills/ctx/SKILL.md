@@ -7,8 +7,10 @@ description: >-
 ## Execution rules
 
 - `ctx` is a **global CLI tool**. Run it directly (`ctx read ...`), never `cd` into the skill directory first.
-- **Always use `2>&1`** so stderr diagnostics (auto-retry messages, warnings) are visible.
-- **Never pipe through `head`, `tail`, `cut`**, or any truncation — `ctx` already manages content length via structural summaries.
+- Preserve the stdout/stderr contract: stdout is result content; stderr is progress, diagnostics, warnings, and errors.
+- Do **not** add `2>&1` by default. Only rerun the exact same `ctx` command with `2>&1` if your agent runtime hides stderr and you need diagnostics.
+- **NEVER pipe `ctx` output through `head`, `tail`, `cut`, `sed`, `awk`, `jq`, `tee`, `cat`, or any other command.** `ctx` already manages content length via structural summaries; shell pipelines break that contract.
+- If output is too broad, use `ctx` navigation instead: `--toc`, `-s/--section`, `--comments`, `ctx links`, `ctx scrape`, or `ctx json`.
 - **Never use `2>/dev/null`** — stderr carries actionable diagnostics, not noise.
 
 ## Core Workflow: search → read
