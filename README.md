@@ -106,7 +106,7 @@ YouTube video URLs are rejected with a clear unsupported error. `ctx` does not p
 ## Authentication
 
 ```bash
-ctx auth login ctx7          # Context7 (OAuth PKCE, opens browser)
+ctx auth login ctx7          # Context7 (device code login, opens browser)
 ctx auth login cloudflare    # Cloudflare Browser Rendering
 ctx auth status              # check what's configured
 ```

@@ -2,7 +2,7 @@
 name: context7-auth
 description: >-
   Use when auditing, debugging, or fixing Context7/ctx7 CLI authentication,
-  OAuth PKCE login, token refresh, Context7 API headers, or compatibility gaps
+  device-code login, token refresh, Context7 API headers, or compatibility gaps
   between this ctx repo and the official upstash/context7 CLI. Trigger on
   Context7 refresh failures such as HTTP 400, invalid_grant, stale ctx7 tokens,
   ctx auth login/status issues, or requests to compare current official
@@ -23,10 +23,10 @@ ctx read github://upstash/context7/packages/cli/src 2>&1
 ```
 
 Use the directory listing to follow current code shape. Look for names and
-symbols like `auth`, `oauth`, `token`, `refresh`, `client_id`, `PKCE`,
+symbols like `auth`, `oauth`, `device`, `token`, `refresh`, `client_id`,
 `credentials`, `constants`, `api`, `login`, and `whoami`; then read only the
-specific files that currently own those paths. Do not assume the old file names
-or locations still exist.
+specific files that currently own those paths. Do not assume the old file names,
+flow shape, or locations still exist.
 
 If GitHub reads are flaky or several files are needed, shallow clone into
 `.scratch/`:
@@ -34,7 +34,7 @@ If GitHub reads are flaky or several files are needed, shallow clone into
 ```bash
 mkdir -p .scratch
 git clone --depth 1 https://github.com/upstash/context7.git .scratch/context7
-rg -n "auth|oauth|token|refresh|client_id|PKCE|credentials|whoami" .scratch/context7/packages/cli/src
+rg -n "auth|oauth|device|token|refresh|client_id|credentials|whoami" .scratch/context7/packages/cli/src
 ```
 
 Do not preserve `.scratch/` as part of the fix.
@@ -43,8 +43,9 @@ Do not preserve `.scratch/` as part of the fix.
 
 Compare upstream against the local auth surfaces:
 
-- `api/auth.go`: token shape, PKCE generation, callback server, auth URL, code
-  exchange, refresh request, refresh error handling, credential save semantics.
+- `api/auth.go`: token shape, device authorization start request, device-token
+  polling behavior, refresh request, refresh error handling, credential save
+  semantics.
 - `api/client.go`: Context7 API base URL, auth injection, Context7 headers.
 - `cmd/auth.go`: login/status/logout UX and whether status accidentally retries
   stale refresh on every run.
@@ -58,9 +59,18 @@ Known upstream anchors to re-check every time:
   `CLI_CLIENT_ID`; do not hard-code from memory without re-reading upstream.
 - Refresh grant body should include `grant_type=refresh_token`, `client_id`,
   and `refresh_token`.
-- Authorization code grant body should include `grant_type=authorization_code`,
-  `client_id`, `code`, `code_verifier`, and `redirect_uri`.
-- Callback port and redirect URI must match the registered upstream CLI client.
+- Login currently uses OAuth device authorization, not local PKCE callback:
+  - start request: `POST /api/oauth/device/code` with `client_id` and best-effort
+    `hostname`.
+  - poll request: `POST /api/oauth/device/token` with
+    `grant_type=urn:ietf:params:oauth:grant-type:device_code`, `client_id`, and
+    `device_code`.
+  - `authorization_pending` keeps polling; `slow_down`, transient network
+    errors, and 5xx responses increase the polling interval by 5 seconds.
+- Old PKCE/callback code (`/api/oauth/authorize`, `authorization_code`,
+  `code_verifier`, fixed localhost callback ports) is legacy drift unless
+  upstream has explicitly reintroduced it. Do not preserve or revive it by
+  default.
 - Official request headers may include client identity/version fields; align
   only when they matter for server behavior or diagnostics.
 
@@ -69,8 +79,8 @@ Known upstream anchors to re-check every time:
 For `Context7 token refresh failed: refresh failed: HTTP 400`, first determine
 which class it belongs to:
 
-1. Local request drift: missing or stale `client_id`, wrong redirect URI, wrong
-   endpoint, or old installed binary.
+1. Local request drift: missing or stale `client_id`, wrong endpoint, stale
+   device-flow semantics, or old installed binary.
 2. Expired/revoked refresh token: upstream returns `invalid_grant`; the CLI
    cannot repair this without a new login.
 3. Poor diagnostics: local code hides the JSON `error` / `error_description`,
@@ -81,6 +91,17 @@ which class it belongs to:
 Fix the confirmed class. Do not rewrite the whole auth layer if a two-line
 protocol drift is the cause.
 
+For login failures, first separate device-flow errors from refresh errors:
+
+1. Device authorization start failed: inspect `/api/oauth/device/code` status
+   and OAuth error JSON.
+2. Polling failed: confirm handling for `authorization_pending`, `slow_down`,
+   `access_denied`, `expired_token`, 5xx, and network errors.
+3. Browser-open failure: this should not invalidate the device code; the CLI
+   must still print the verification URL/code for manual completion.
+4. Credential save failure: approval succeeded but `SaveTokens` failed; do not
+   misdiagnose this as an OAuth rejection.
+
 ## Repair Defaults
 
 - Parse OAuth error JSON and include `error_description` in diagnostics.
@@ -88,6 +109,10 @@ protocol drift is the cause.
   `invalid_grant`; do not delete credentials for transient network failures.
 - Preserve the old refresh token when a successful refresh response omits a new
   `refresh_token`.
+- Keep the device authorization flow aligned with upstream. Delete local
+  PKCE/callback machinery unless upstream brings it back.
+- Treat `slow_down`, transient network failures, and 5xx device-token polling
+  responses as retryable with a +5s poll backoff.
 - Keep anonymous fallback for `search`/`docs` if existing behavior depends on
   unauthenticated access, but stop repeated stale-token retries when possible.
 - If the installed `ctx` binary is older than the repo fix, call that out

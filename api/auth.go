@@ -1,9 +1,6 @@
 package api
 
 import (
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,9 +16,9 @@ import (
 )
 
 const (
-	clientID     = "2veBSofhicRBguUT"
-	callbackPort = 52417
-	redirectURI  = "http://localhost:52417/callback"
+	clientID                         = "2veBSofhicRBguUT"
+	deviceCodeGrant                  = "urn:ietf:params:oauth:grant-type:device_code"
+	defaultDevicePollIntervalSeconds = 5
 )
 
 type TokenData struct {
@@ -42,19 +39,52 @@ type oauthTokenError struct {
 	StatusCode       int
 	Code             string
 	ErrorDescription string
+	Operation        string
 }
 
+type deviceAuthorization struct {
+	DeviceCode              string `json:"device_code"`
+	UserCode                string `json:"user_code"`
+	VerificationURI         string `json:"verification_uri"`
+	VerificationURIComplete string `json:"verification_uri_complete,omitempty"`
+	ExpiresIn               int64  `json:"expires_in"`
+	Interval                int64  `json:"interval,omitempty"`
+}
+
+type devicePollStatus string
+
+const (
+	devicePollApproved  devicePollStatus = "approved"
+	devicePollPending   devicePollStatus = "pending"
+	devicePollSlowDown  devicePollStatus = "slow_down"
+	devicePollDenied    devicePollStatus = "denied"
+	devicePollExpired   devicePollStatus = "expired"
+	devicePollTransient devicePollStatus = "transient"
+)
+
+type devicePollResult struct {
+	Status       devicePollStatus
+	Tokens       *TokenData
+	ErrorMessage string
+}
+
+var sleep = time.Sleep
+
 func (e *oauthTokenError) Error() string {
+	operation := e.Operation
+	if operation == "" {
+		operation = "refresh failed"
+	}
 	if e.ErrorDescription != "" {
 		if e.Code != "" {
-			return fmt.Sprintf("refresh failed: HTTP %d: %s (%s)", e.StatusCode, e.ErrorDescription, e.Code)
+			return fmt.Sprintf("%s: HTTP %d: %s (%s)", operation, e.StatusCode, e.ErrorDescription, e.Code)
 		}
-		return fmt.Sprintf("refresh failed: HTTP %d: %s", e.StatusCode, e.ErrorDescription)
+		return fmt.Sprintf("%s: HTTP %d: %s", operation, e.StatusCode, e.ErrorDescription)
 	}
 	if e.Code != "" {
-		return fmt.Sprintf("refresh failed: HTTP %d: %s", e.StatusCode, e.Code)
+		return fmt.Sprintf("%s: HTTP %d: %s", operation, e.StatusCode, e.Code)
 	}
-	return fmt.Sprintf("refresh failed: HTTP %d", e.StatusCode)
+	return fmt.Sprintf("%s: HTTP %d", operation, e.StatusCode)
 }
 
 func LoadTokens() (*TokenData, error) {
@@ -174,167 +204,136 @@ func refreshToken(baseURL, refresh string) (*TokenData, error) {
 	return &t, nil
 }
 
-// Login runs the full OAuth PKCE flow: start server, open browser, wait for callback.
+// Login runs Context7's current device authorization flow, matching the upstream CLI.
 func Login(baseURL string, noBrowser bool) error {
-	verifier, challenge := generatePKCE()
-	state := generateState()
-	authURL := buildAuthURL(baseURL, challenge, state)
-
-	done := make(chan struct{}, 1)
-	var callbackCode string
-	var callbackErr error
-
-	mux := http.NewServeMux()
-	srv := &http.Server{
-		Addr:    fmt.Sprintf("127.0.0.1:%d", callbackPort),
-		Handler: mux,
+	authorization, err := startDeviceAuthorization(baseURL)
+	if err != nil {
+		return fmt.Errorf("login failed: %w", err)
 	}
 
-	mux.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
-		if errParam := r.URL.Query().Get("error"); errParam != "" {
-			desc := r.URL.Query().Get("error_description")
-			if desc == "" {
-				desc = errParam
-			}
-			w.Header().Set("Content-Type", "text/html")
-			fmt.Fprint(w, htmlPage("Login Failed", desc, "#dc2626"))
-			callbackErr = fmt.Errorf("%s", desc)
-			select {
-			case done <- struct{}{}:
-			default:
-			}
-			go srv.Close()
-			return
-		}
-
-		code := r.URL.Query().Get("code")
-		rState := r.URL.Query().Get("state")
-		if code == "" || rState == "" {
-			w.Header().Set("Content-Type", "text/html")
-			fmt.Fprint(w, htmlPage("Login Failed", "Missing code or state", "#dc2626"))
-			callbackErr = fmt.Errorf("missing code or state")
-			select {
-			case done <- struct{}{}:
-			default:
-			}
-			go srv.Close()
-			return
-		}
-		if rState != state {
-			w.Header().Set("Content-Type", "text/html")
-			fmt.Fprint(w, htmlPage("Login Failed", "State mismatch", "#dc2626"))
-			callbackErr = fmt.Errorf("state mismatch")
-			select {
-			case done <- struct{}{}:
-			default:
-			}
-			go srv.Close()
-			return
-		}
-
-		w.Header().Set("Content-Type", "text/html")
-		fmt.Fprint(w, htmlPage("Login Successful!", "You can close this window and return to the terminal.", "#16a34a"))
-		callbackCode = code
-		select {
-		case done <- struct{}{}:
-		default:
-		}
-		go srv.Close()
-	})
-
-	go func() {
-		time.Sleep(5 * time.Minute)
-		callbackErr = fmt.Errorf("login timed out after 5 minutes — no browser callback received")
-		select {
-		case done <- struct{}{}:
-		default:
-		}
-		srv.Close()
-	}()
-
-	go func() {
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			callbackErr = fmt.Errorf("failed to start callback server on port %d: %w", callbackPort, err)
-			select {
-			case done <- struct{}{}:
-			default:
-			}
-		}
-	}()
+	printDeviceAuthorization(authorization)
+	target := authorization.VerificationURIComplete
+	if target == "" {
+		target = authorization.VerificationURI
+	}
 
 	if noBrowser {
-		fmt.Printf("Open this URL in your browser:\n%s\n", authURL)
+		fmt.Println("Open the link above in any browser to continue.")
 	} else {
 		fmt.Println("Opening browser for login...")
-		openBrowser(authURL)
+		openBrowser(target)
 	}
 
 	fmt.Println("Waiting for authorization...")
-	<-done
 
-	if callbackErr != nil {
-		return callbackErr
+	deadline := time.Now().Add(time.Duration(authorization.ExpiresIn) * time.Second)
+	interval := authorization.Interval
+	if interval == 0 {
+		interval = defaultDevicePollIntervalSeconds
+	}
+	intervalDuration := time.Duration(interval) * time.Second
+
+	for time.Now().Before(deadline) {
+		sleep(intervalDuration)
+		result, err := pollDeviceToken(baseURL, authorization.DeviceCode)
+		if err != nil {
+			return fmt.Errorf("login failed: %w", err)
+		}
+
+		switch result.Status {
+		case devicePollApproved:
+			if result.Tokens == nil {
+				return fmt.Errorf("login failed: device authorization approved without tokens")
+			}
+			if err := SaveTokens(result.Tokens); err != nil {
+				return err
+			}
+			return nil
+		case devicePollPending:
+			continue
+		case devicePollSlowDown, devicePollTransient:
+			// RFC 8628 requires reducing poll frequency on slow_down; upstream also
+			// applies the same backoff to transient 5xx/network errors.
+			intervalDuration += 5 * time.Second
+			continue
+		case devicePollDenied:
+			return fmt.Errorf("authorization denied")
+		case devicePollExpired:
+			return fmt.Errorf("code expired; run login again")
+		default:
+			if result.ErrorMessage != "" {
+				return fmt.Errorf("login failed: %s", result.ErrorMessage)
+			}
+			return fmt.Errorf("login failed: unexpected device poll status %q", result.Status)
+		}
 	}
 
-	// Exchange code for tokens
-	tokens, err := exchangeCode(baseURL, callbackCode, verifier)
-	if err != nil {
-		return fmt.Errorf("token exchange failed: %w", err)
-	}
-
-	return SaveTokens(tokens)
+	return fmt.Errorf("code expired without approval")
 }
 
-func exchangeCode(baseURL, code, verifier string) (*TokenData, error) {
-	resp, err := http.PostForm(baseURL+"/api/oauth/token", url.Values{
-		"grant_type":    {"authorization_code"},
-		"client_id":     {clientID},
-		"code":          {code},
-		"code_verifier": {verifier},
-		"redirect_uri":  {redirectURI},
-	})
+func startDeviceAuthorization(baseURL string) (*deviceAuthorization, error) {
+	params := url.Values{"client_id": {clientID}}
+	if hostname, err := os.Hostname(); err == nil && hostname != "" {
+		params.Set("hostname", hostname)
+	}
+
+	resp, err := http.PostForm(baseURL+"/api/oauth/device/code", params)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
+		return nil, tokenEndpointError(resp, "device authorization failed")
 	}
 
-	var t TokenData
-	if err := json.NewDecoder(resp.Body).Decode(&t); err != nil {
+	var authorization deviceAuthorization
+	if err := json.NewDecoder(resp.Body).Decode(&authorization); err != nil {
 		return nil, err
 	}
-	return &t, nil
+	return &authorization, nil
 }
 
-func generatePKCE() (verifier, challenge string) {
-	b := make([]byte, 32)
-	rand.Read(b)
-	verifier = base64.RawURLEncoding.EncodeToString(b)
-	h := sha256.Sum256([]byte(verifier))
-	challenge = base64.RawURLEncoding.EncodeToString(h[:])
-	return
-}
-
-func generateState() string {
-	b := make([]byte, 16)
-	rand.Read(b)
-	return base64.RawURLEncoding.EncodeToString(b)
-}
-
-func buildAuthURL(baseURL, challenge, state string) string {
-	params := url.Values{
-		"client_id":             {clientID},
-		"redirect_uri":          {redirectURI},
-		"code_challenge":        {challenge},
-		"code_challenge_method": {"S256"},
-		"state":                 {state},
-		"scope":                 {"profile email"},
-		"response_type":         {"code"},
+func pollDeviceToken(baseURL, deviceCode string) (*devicePollResult, error) {
+	resp, err := http.PostForm(baseURL+"/api/oauth/device/token", url.Values{
+		"grant_type":  {deviceCodeGrant},
+		"client_id":   {clientID},
+		"device_code": {deviceCode},
+	})
+	if err != nil {
+		return &devicePollResult{Status: devicePollTransient, ErrorMessage: err.Error()}, nil
 	}
-	return baseURL + "/api/oauth/authorize?" + params.Encode()
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusOK {
+		var t TokenData
+		if err := json.NewDecoder(resp.Body).Decode(&t); err != nil {
+			return nil, err
+		}
+		return &devicePollResult{Status: devicePollApproved, Tokens: &t}, nil
+	}
+
+	var tokenErr tokenErrorResponse
+	_ = json.NewDecoder(resp.Body).Decode(&tokenErr)
+	if resp.StatusCode >= 500 {
+		return &devicePollResult{
+			Status:       devicePollTransient,
+			ErrorMessage: firstNonEmpty(tokenErr.ErrorDescription, tokenErr.Error, fmt.Sprintf("HTTP %d", resp.StatusCode)),
+		}, nil
+	}
+
+	switch tokenErr.Error {
+	case "authorization_pending":
+		return &devicePollResult{Status: devicePollPending}, nil
+	case "slow_down":
+		return &devicePollResult{Status: devicePollSlowDown}, nil
+	case "access_denied":
+		return &devicePollResult{Status: devicePollDenied}, nil
+	case "expired_token":
+		return &devicePollResult{Status: devicePollExpired}, nil
+	default:
+		return nil, fmt.Errorf("%s", firstNonEmpty(tokenErr.ErrorDescription, tokenErr.Error, "device token poll failed"))
+	}
 }
 
 func openBrowser(url string) {
@@ -350,15 +349,35 @@ func openBrowser(url string) {
 	cmd.Start()
 }
 
-func htmlPage(title, message, color string) string {
-	message = strings.ReplaceAll(message, "&", "&amp;")
-	message = strings.ReplaceAll(message, "<", "&lt;")
-	message = strings.ReplaceAll(message, ">", "&gt;")
-	return fmt.Sprintf(`<!DOCTYPE html>
-<html><head><title>%s</title></head>
-<body style="font-family:system-ui;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;background:#f9fafb">
-<div style="text-align:center;padding:2rem">
-<h1 style="color:%s">%s</h1>
-<p style="color:#6b7280">%s</p>
-</div></body></html>`, title, color, title, message)
+func printDeviceAuthorization(authorization *deviceAuthorization) {
+	fmt.Println("Sign in to Context7")
+	fmt.Printf("One-time code: %s\n", authorization.UserCode)
+	if authorization.VerificationURIComplete != "" {
+		fmt.Printf("Approve: %s\n", authorization.VerificationURIComplete)
+		fmt.Printf("Or visit %s and enter the code above.\n", authorization.VerificationURI)
+		return
+	}
+	fmt.Printf("Visit: %s\n", authorization.VerificationURI)
+}
+
+func tokenEndpointError(resp *http.Response, operation string) error {
+	var tokenErr tokenErrorResponse
+	if err := json.NewDecoder(resp.Body).Decode(&tokenErr); err == nil {
+		return &oauthTokenError{
+			StatusCode:       resp.StatusCode,
+			Code:             tokenErr.Error,
+			ErrorDescription: tokenErr.ErrorDescription,
+			Operation:        operation,
+		}
+	}
+	return &oauthTokenError{StatusCode: resp.StatusCode, Operation: operation}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
